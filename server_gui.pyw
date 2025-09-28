@@ -90,15 +90,34 @@ class AudioSender:
         self._ensure_encoder()
         self._open_socket()
 
-        # Open input stream with 2 channels; PortAudio will map first two device channels
-        self.stream = sd.InputStream(
+        # Prepare low-latency WASAPI settings when available
+        extra = None
+        kwargs = dict(
             device=self.device_id,
             samplerate=self.sample_rate,
             channels=2,
             blocksize=self.frame_size,
             dtype='int16',
             callback=self._callback,
+            latency='low',
         )
+        try:
+            dev = sd.query_devices(self.device_id)
+            host = sd.query_hostapis(dev.get('hostapi', 0)).get('name', '').lower()
+            name = str(dev.get('name', '')).lower()
+            if 'wasapi' in host:
+                if '(loopback)' in name:
+                    # Loopback works only in shared mode, but we still request low latency
+                    extra = sd.WasapiSettings(loopback=True, exclusive=False)
+                else:
+                    # Try exclusive mode for capture devices to cut system mixer latency
+                    extra = sd.WasapiSettings(exclusive=True)
+                kwargs['extra_settings'] = extra
+        except Exception:
+            pass
+
+        # Open input stream
+        self.stream = sd.InputStream(**kwargs)
         self.stream.start()
         self.running = True
 
