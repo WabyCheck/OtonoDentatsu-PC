@@ -4,6 +4,8 @@
 import json
 import socket
 import threading
+import sys
+import os
 import tkinter as tk
 import tkinter.ttk as ttk
 from tkinter import messagebox
@@ -118,6 +120,14 @@ class App(tk.Tk):
         super().__init__()
         self.title("OND Client")
         self.resizable(False, False)
+        # window icon (prefer .ico)
+        try:
+            self.iconbitmap(resource_path('icon.ico'))
+        except Exception:
+            try:
+                self.iconphoto(False, tk.PhotoImage(file=resource_path('icon.png')))
+            except Exception:
+                pass
 
         self.sender = AudioSender()
 
@@ -336,16 +346,27 @@ if __name__ == '__main__':
 
     
     
-def _make_icon_image():
-    img = Image.new('RGBA', (128, 128), (32, 96, 224, 255))
-    d = ImageDraw.Draw(img)
-    # simple white rectangle letters "OND"
-    d.rectangle([16, 52, 48, 76], fill=(255, 255, 255, 255))
-    d.rectangle([54, 52, 62, 76], fill=(255, 255, 255, 255))
-    d.rectangle([62, 52, 86, 60], fill=(255, 255, 255, 255))
-    d.rectangle([62, 68, 86, 76], fill=(255, 255, 255, 255))
-    d.rectangle([90, 52, 112, 76], fill=(255, 255, 255, 255))
-    return img
+def _load_tray_image():
+    # Try user-provided icon first
+    try:
+        img = Image.open(resource_path('icon.ico'))
+    except Exception:
+        try:
+            img = Image.open(resource_path('icon.png'))
+        except Exception:
+            # fallback to generated icon
+            img = Image.new('RGBA', (128, 128), (32, 96, 224, 255))
+            d = ImageDraw.Draw(img)
+            d.rectangle([16, 52, 48, 76], fill=(255, 255, 255, 255))
+            d.rectangle([54, 52, 62, 76], fill=(255, 255, 255, 255))
+            d.rectangle([62, 52, 86, 60], fill=(255, 255, 255, 255))
+            d.rectangle([62, 68, 86, 76], fill=(255, 255, 255, 255))
+            d.rectangle([90, 52, 112, 76], fill=(255, 255, 255, 255))
+    # Resize to typical tray size
+    try:
+        return img.resize((16, 16), Image.LANCZOS)
+    except Exception:
+        return img
 
 
 def _tray_menu(app: 'App'):
@@ -357,7 +378,7 @@ def _tray_menu(app: 'App'):
 
 
 def _init_tray_for(app: 'App'):
-    image = _make_icon_image()
+    image = _load_tray_image()
     icon = pystray.Icon('OND Client', image, 'OND Client', _tray_menu(app))
     app._tray = icon
     def run():
@@ -373,3 +394,8 @@ def _init_tray(self: 'App'):
     _init_tray_for(self)
 
 App._init_tray = _init_tray
+
+
+def resource_path(rel: str) -> str:
+    base = getattr(sys, '_MEIPASS', os.path.abspath('.'))
+    return os.path.join(base, rel)
