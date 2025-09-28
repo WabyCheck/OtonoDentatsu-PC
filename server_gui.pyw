@@ -142,7 +142,7 @@ class App(tk.Tk):
         self.var_port = tk.StringVar(value="5000")
         self.var_samplerate = tk.StringVar(value="48000")
         self.var_bitrate = tk.StringVar(value="128000")
-        self.var_framesize = tk.StringVar(value="240")
+        self.var_framesize = tk.StringVar(value="120")
         self.status_var = tk.StringVar(value="Остановлено")
         self.local_ip_var = tk.StringVar(value=self._detect_local_ip())
 
