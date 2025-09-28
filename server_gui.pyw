@@ -35,6 +35,7 @@ class AudioSender:
         self._q: Queue[np.ndarray] = Queue(maxsize=256)
         self._tx_thread: threading.Thread | None = None
         self._stop = threading.Event()
+        self.use_l4s = False
 
         # state protected by GIL; callback is same process/thread context from PortAudio
 
@@ -55,6 +56,24 @@ class AudioSender:
 
     def _open_socket(self):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        if self.use_l4s:
+            try:
+                # Set ECN ECT(1) in IPv4 TOS (lowest 2 bits = 01)
+                self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_TOS, 0x01)
+            except Exception:
+                pass
+
+    def set_l4s(self, enabled: bool):
+        self.use_l4s = bool(enabled)
+        try:
+            if self.sock is not None:
+                if self.use_l4s:
+                    self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_TOS, 0x01)
+                else:
+                    # reset to 0 (no ECN marking)
+                    self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_TOS, 0x00)
+        except Exception:
+            pass
 
     def _callback(self, indata, frames, time, status):
         # Keep callback ultra-light: convert to int16 stereo and enqueue; drop oldest on overflow
@@ -173,6 +192,7 @@ class App(tk.Tk):
         self.status_var = tk.StringVar(value="Остановлено")
         self.local_ip_var = tk.StringVar(value=self._detect_local_ip())
         self.conn_status_var = tk.StringVar(value="Ждём HELLO")
+        self.var_l4s = tk.BooleanVar(value=False)
 
         self.devices = []  # list[(id, name)]
 
@@ -209,7 +229,9 @@ class App(tk.Tk):
 
         ttk.Label(frm, text="Порт (HELLO)").grid(row=3, column=0, sticky='w', **pad)
         ttk.Entry(frm, textvariable=self.var_port, width=10).grid(row=3, column=1, sticky='w', **pad)
-        ttk.Label(frm, textvariable=self.conn_status_var).grid(row=3, column=2, columnspan=3, sticky='w', **pad)
+        ttk.Label(frm, textvariable=self.conn_status_var).grid(row=3, column=2, columnspan=2, sticky='w', **pad)
+        self.chk_l4s = ttk.Checkbutton(frm, text="L4S", variable=self.var_l4s, command=self._apply_l4s_flag)
+        self.chk_l4s.grid(row=3, column=4, sticky='e', **pad)
 
         ttk.Label(frm, text="Sample rate").grid(row=4, column=0, sticky='w', **pad)
         ttk.Entry(frm, textvariable=self.var_samplerate, width=10).grid(row=4, column=1, sticky='w', **pad)
@@ -269,6 +291,7 @@ class App(tk.Tk):
             'samplerate': self.var_samplerate.get(),
             'bitrate': self.var_bitrate.get(),
             'framesize': self.var_framesize.get(),
+            'l4s': self.var_l4s.get(),
         }
         try:
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
@@ -286,6 +309,7 @@ class App(tk.Tk):
             self.var_samplerate.set(data.get('samplerate', self.var_samplerate.get()))
             self.var_bitrate.set(data.get('bitrate', self.var_bitrate.get()))
             self.var_framesize.set(data.get('framesize', self.var_framesize.get()))
+            self.var_l4s.set(bool(data.get('l4s', False)))
         except Exception:
             pass
 
@@ -304,6 +328,7 @@ class App(tk.Tk):
             # target устанавливается после получения HELLO; временно None
             self.sender.configure("0.0.0.0", 0, sr, fs, br, dev_id)
             self.sender.start()
+            self.sender.set_l4s(self.var_l4s.get())
             self.btn_toggle.configure(text='Стоп', state='normal')
             self.status_var.set(f"Запущено: порт {port} @ {sr}Hz, {br}bps, frame={fs}")
             self.conn_status_var.set("Ждём HELLO")
@@ -408,6 +433,12 @@ class App(tk.Tk):
 
     def _on_source_change(self):
         self._populate_devices()
+
+    def _apply_l4s_flag(self):
+        try:
+            self.sender.set_l4s(self.var_l4s.get())
+        except Exception:
+            pass
 
 
 if __name__ == '__main__':
