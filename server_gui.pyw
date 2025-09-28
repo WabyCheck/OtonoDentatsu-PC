@@ -116,9 +116,30 @@ class AudioSender:
         except Exception:
             pass
 
-        # Open input stream
-        self.stream = sd.InputStream(**kwargs)
-        self.stream.start()
+        # Try to open stream; on failure with exclusive, fallback to shared
+        def _try_open(_kwargs):
+            s = sd.InputStream(**_kwargs)
+            s.start()
+            return s
+
+        try:
+            self.stream = _try_open(kwargs)
+        except Exception as e1:
+            # Fallback: if we tried WASAPI exclusive, drop to shared
+            try:
+                if 'extra_settings' in kwargs and isinstance(kwargs['extra_settings'], sd.WasapiSettings) and getattr(kwargs['extra_settings'], 'exclusive', False):
+                    ws = sd.WasapiSettings(exclusive=False)
+                    kwargs_fallback = dict(kwargs)
+                    kwargs_fallback['extra_settings'] = ws
+                    self.stream = _try_open(kwargs_fallback)
+                else:
+                    raise e1
+            except Exception as e2:
+                # Final fallback: remove extra_settings entirely
+                kwargs_final = dict(kwargs)
+                kwargs_final.pop('extra_settings', None)
+                self.stream = _try_open(kwargs_final)
+
         self.running = True
 
     def stop(self):
