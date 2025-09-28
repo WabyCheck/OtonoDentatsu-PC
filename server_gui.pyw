@@ -42,7 +42,12 @@ class AudioSender:
         self.device_id = device_id
 
     def _ensure_encoder(self):
-        enc = opuslib.Encoder(self.sample_rate, 2, opuslib.APPLICATION_AUDIO)
+        # use restricted low-delay profile to reduce algorithmic latency
+        try:
+            application = opuslib.APPLICATION_RESTRICTED_LOWDELAY
+        except AttributeError:
+            application = opuslib.APPLICATION_AUDIO
+        enc = opuslib.Encoder(self.sample_rate, 2, application)
         enc.bitrate = self.bitrate
         enc.complexity = 10
         enc.signal_type = opuslib.SIGNAL_MUSIC
