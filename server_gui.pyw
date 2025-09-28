@@ -133,6 +133,7 @@ class App(tk.Tk):
 
         # UI variables
         self.var_device = tk.StringVar()
+        self.var_source = tk.StringVar(value="Микрофон")
         self.var_port = tk.StringVar(value="5000")
         self.var_samplerate = tk.StringVar(value="48000")
         self.var_bitrate = tk.StringVar(value="128000")
@@ -159,10 +160,15 @@ class App(tk.Tk):
         frm = ttk.Frame(self)
         frm.grid(row=0, column=0, sticky='nsew', padx=10, pady=10)
 
-        ttk.Label(frm, text="Устройство ввода").grid(row=0, column=0, sticky='w', **pad)
+        ttk.Label(frm, text="Источник").grid(row=0, column=0, sticky='w', **pad)
+        self.cmb_source = ttk.Combobox(frm, textvariable=self.var_source, values=["Микрофон", "Системный звук (Loopback)"], state='readonly', width=28)
+        self.cmb_source.grid(row=0, column=1, sticky='w', **pad)
+        self.cmb_source.bind('<<ComboboxSelected>>', lambda e: self._populate_devices())
+
+        ttk.Label(frm, text="Устройство").grid(row=0, column=2, sticky='w', **pad)
         self.cmb_device = ttk.Combobox(frm, textvariable=self.var_device, width=40, state='readonly')
-        self.cmb_device.grid(row=0, column=1, columnspan=2, sticky='ew', **pad)
-        ttk.Button(frm, text="Обновить", command=self._populate_devices).grid(row=0, column=3, **pad)
+        self.cmb_device.grid(row=0, column=3, sticky='ew', **pad)
+        ttk.Button(frm, text="Обновить", command=self._populate_devices).grid(row=0, column=4, **pad)
 
         ttk.Label(frm, text="IP ПК").grid(row=1, column=0, sticky='w', **pad)
         ttk.Label(frm, textvariable=self.local_ip_var).grid(row=1, column=1, sticky='w', **pad)
@@ -181,7 +187,7 @@ class App(tk.Tk):
         ttk.Entry(frm, textvariable=self.var_framesize, width=10).grid(row=4, column=1, sticky='w', **pad)
 
         self.btn_toggle = ttk.Button(frm, text="Старт", command=self.on_toggle)
-        self.btn_toggle.grid(row=5, column=0, columnspan=4, sticky='ew', **pad)
+        self.btn_toggle.grid(row=5, column=0, columnspan=5, sticky='ew', **pad)
 
         ttk.Label(frm, textvariable=self.status_var, foreground='green').grid(row=6, column=0, columnspan=4, sticky='w', **pad)
 
@@ -194,11 +200,22 @@ class App(tk.Tk):
 
         self.devices.clear()
         items = []
+        src = self.var_source.get()
         for idx, d in enumerate(devs):
-            if d.get('max_input_channels', 0) > 0:
-                name = f"{idx}: {d.get('name', 'Unknown')}"
-                self.devices.append((idx, d.get('name', 'Unknown')))
-                items.append(name)
+            name_raw = d.get('name', 'Unknown')
+            max_in = d.get('max_input_channels', 0)
+            if src == "Микрофон":
+                # обычные входные устройства (не loopback)
+                if max_in > 0 and '(loopback)' not in name_raw.lower():
+                    name = f"{idx}: {name_raw}"
+                    self.devices.append((idx, name_raw))
+                    items.append(name)
+            else:
+                # системный звук — устройства loopback, они отображаются как входные с пометкой
+                if max_in > 0 and '(loopback)' in name_raw.lower():
+                    name = f"{idx}: {name_raw}"
+                    self.devices.append((idx, name_raw))
+                    items.append(name)
         self.cmb_device['values'] = items
 
         # select previous or first
@@ -210,6 +227,7 @@ class App(tk.Tk):
     def _save_settings(self):
         data = {
             'device': self.var_device.get(),
+            'source': self.var_source.get(),
             'port': self.var_port.get(),
             'samplerate': self.var_samplerate.get(),
             'bitrate': self.var_bitrate.get(),
@@ -226,6 +244,7 @@ class App(tk.Tk):
             with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             self.var_device.set(data.get('device', ''))
+            self.var_source.set(data.get('source', self.var_source.get()))
             self.var_port.set(data.get('port', self.var_port.get()))
             self.var_samplerate.set(data.get('samplerate', self.var_samplerate.get()))
             self.var_bitrate.set(data.get('bitrate', self.var_bitrate.get()))

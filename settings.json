@@ -1,0 +1,7 @@
+{
+  "device": "16: CABLE Output (VB-Audio Point)",
+  "port": "5000",
+  "samplerate": "48000",
+  "bitrate": "64000",
+  "framesize": "480"
+}
