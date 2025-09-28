@@ -121,7 +121,6 @@ class App(tk.Tk):
 
         # UI variables
         self.var_device = tk.StringVar()
-        self.var_ip = tk.StringVar(value="192.168.0.100")
         self.var_port = tk.StringVar(value="5000")
         self.var_samplerate = tk.StringVar(value="48000")
         self.var_bitrate = tk.StringVar(value="128000")
@@ -151,11 +150,9 @@ class App(tk.Tk):
         ttk.Label(frm, text="IP ПК").grid(row=1, column=0, sticky='w', **pad)
         ttk.Label(frm, textvariable=self.local_ip_var).grid(row=1, column=1, sticky='w', **pad)
 
-        ttk.Label(frm, text="Целевой IP").grid(row=2, column=0, sticky='w', **pad)
-        ttk.Entry(frm, textvariable=self.var_ip, width=18).grid(row=2, column=1, sticky='w', **pad)
-
-        ttk.Label(frm, text="Порт").grid(row=2, column=2, sticky='e', **pad)
-        ttk.Entry(frm, textvariable=self.var_port, width=10).grid(row=2, column=3, sticky='w', **pad)
+        ttk.Label(frm, text="Порт (HELLO)").grid(row=2, column=0, sticky='w', **pad)
+        ttk.Entry(frm, textvariable=self.var_port, width=10).grid(row=2, column=1, sticky='w', **pad)
+        ttk.Label(frm, text="Статус подключения: ожидание HELLO от телефона").grid(row=2, column=2, columnspan=2, sticky='w', **pad)
 
         ttk.Label(frm, text="Sample rate").grid(row=3, column=0, sticky='w', **pad)
         ttk.Entry(frm, textvariable=self.var_samplerate, width=10).grid(row=3, column=1, sticky='w', **pad)
@@ -196,7 +193,6 @@ class App(tk.Tk):
     def _save_settings(self):
         data = {
             'device': self.var_device.get(),
-            'ip': self.var_ip.get(),
             'port': self.var_port.get(),
             'samplerate': self.var_samplerate.get(),
             'bitrate': self.var_bitrate.get(),
@@ -213,7 +209,6 @@ class App(tk.Tk):
             with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             self.var_device.set(data.get('device', ''))
-            self.var_ip.set(data.get('ip', self.var_ip.get()))
             self.var_port.set(data.get('port', self.var_port.get()))
             self.var_samplerate.set(data.get('samplerate', self.var_samplerate.get()))
             self.var_bitrate.set(data.get('bitrate', self.var_bitrate.get()))
@@ -228,16 +223,17 @@ class App(tk.Tk):
                 return
 
             dev_id = int(self.cmb_device.get().split(':', 1)[0])
-            ip = self.var_ip.get().strip()
             port = int(self.var_port.get())
             sr = int(self.var_samplerate.get())
             fs = int(self.var_framesize.get())
             br = int(self.var_bitrate.get())
 
-            self.sender.configure(ip, port, sr, fs, br, dev_id)
+            # target устанавливается после получения HELLO; временно None
+            self.sender.configure("0.0.0.0", 0, sr, fs, br, dev_id)
             self.sender.start()
             self.btn_toggle.configure(text='Стоп', state='normal')
-            self.status_var.set(f"Запущено → {ip}:{port} @ {sr}Hz, {br}bps, frame={fs}")
+            self.status_var.set(f"Запущено → ожидание HELLO на порту {port} @ {sr}Hz, {br}bps, frame={fs}")
+            self._start_hello_listener(port)
             self._save_settings()
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось запустить: {e}")
@@ -248,6 +244,7 @@ class App(tk.Tk):
         finally:
             self.btn_toggle.configure(text='Старт', state='normal')
             self.status_var.set("Остановлено")
+            self._stop_hello_listener()
 
     def on_toggle(self):
         self.btn_toggle.configure(state='disabled')
@@ -262,6 +259,7 @@ class App(tk.Tk):
             self.sender.stop()
         finally:
             self.destroy()
+            self._stop_hello_listener()
 
     def _detect_local_ip(self) -> str:
         # Try default route IP
@@ -283,6 +281,42 @@ class App(tk.Tk):
         except Exception:
             pass
         return "0.0.0.0"
+
+    def _start_hello_listener(self, port: int):
+        self._hello_stop = threading.Event()
+        self._hello_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._hello_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._hello_sock.bind(("0.0.0.0", int(port)))
+
+        def run():
+            while not self._hello_stop.is_set():
+                try:
+                    self._hello_sock.settimeout(0.5)
+                    data, addr = self._hello_sock.recvfrom(1024)
+                    if data and data.startswith(b"HELLO"):
+                        # зафиксируем клиента
+                        self.sender.target = (addr[0], addr[1])
+                        self.status_var.set(f"Клиент: {addr[0]}:{addr[1]}")
+                except socket.timeout:
+                    continue
+                except Exception:
+                    break
+        self._hello_thr = threading.Thread(target=run, daemon=True)
+        self._hello_thr.start()
+
+    def _stop_hello_listener(self):
+        try:
+            if hasattr(self, '_hello_stop') and self._hello_stop:
+                self._hello_stop.set()
+            if hasattr(self, '_hello_sock') and self._hello_sock:
+                try:
+                    self._hello_sock.close()
+                except Exception:
+                    pass
+            if hasattr(self, '_hello_thr') and self._hello_thr and self._hello_thr.is_alive():
+                self._hello_thr.join(timeout=1)
+        except Exception:
+            pass
 
 
 if __name__ == '__main__':
