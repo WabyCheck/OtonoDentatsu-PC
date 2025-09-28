@@ -172,6 +172,7 @@ class App(tk.Tk):
         self.var_framesize = tk.StringVar(value="240")
         self.status_var = tk.StringVar(value="Остановлено")
         self.local_ip_var = tk.StringVar(value=self._detect_local_ip())
+        self.conn_status_var = tk.StringVar(value="Ждём HELLO")
 
         self.devices = []  # list[(id, name)]
 
@@ -195,33 +196,34 @@ class App(tk.Tk):
         ttk.Label(frm, text="Источник").grid(row=0, column=0, sticky='w', **pad)
         self.cmb_source = ttk.Combobox(frm, textvariable=self.var_source, values=["Микрофон", "Системный звук (Loopback)"], state='readonly', width=28)
         self.cmb_source.grid(row=0, column=1, sticky='w', **pad)
-        self.cmb_source.bind('<<ComboboxSelected>>', lambda e: self._populate_devices())
+        self.cmb_source.bind('<<ComboboxSelected>>', lambda e: self._on_source_change())
 
-        ttk.Label(frm, text="Устройство").grid(row=0, column=2, sticky='w', **pad)
+        ttk.Label(frm, text="Устройство").grid(row=1, column=0, sticky='w', **pad)
         self.cmb_device = ttk.Combobox(frm, textvariable=self.var_device, width=40, state='readonly')
-        self.cmb_device.grid(row=0, column=3, sticky='ew', **pad)
-        ttk.Button(frm, text="Обновить", command=self._populate_devices).grid(row=0, column=4, **pad)
+        self.cmb_device.grid(row=1, column=1, columnspan=3, sticky='ew', **pad)
+        self.btn_refresh = ttk.Button(frm, text="Обновить", command=self._populate_devices)
+        self.btn_refresh.grid(row=1, column=4, **pad)
 
-        ttk.Label(frm, text="IP ПК").grid(row=1, column=0, sticky='w', **pad)
-        ttk.Label(frm, textvariable=self.local_ip_var).grid(row=1, column=1, sticky='w', **pad)
+        ttk.Label(frm, text="IP ПК").grid(row=2, column=0, sticky='w', **pad)
+        ttk.Label(frm, textvariable=self.local_ip_var).grid(row=2, column=1, sticky='w', **pad)
 
-        ttk.Label(frm, text="Порт (HELLO)").grid(row=2, column=0, sticky='w', **pad)
-        ttk.Entry(frm, textvariable=self.var_port, width=10).grid(row=2, column=1, sticky='w', **pad)
-        ttk.Label(frm, text="Статус подключения: ожидание HELLO от телефона").grid(row=2, column=2, columnspan=2, sticky='w', **pad)
+        ttk.Label(frm, text="Порт (HELLO)").grid(row=3, column=0, sticky='w', **pad)
+        ttk.Entry(frm, textvariable=self.var_port, width=10).grid(row=3, column=1, sticky='w', **pad)
+        ttk.Label(frm, textvariable=self.conn_status_var).grid(row=3, column=2, columnspan=3, sticky='w', **pad)
 
-        ttk.Label(frm, text="Sample rate").grid(row=3, column=0, sticky='w', **pad)
-        ttk.Entry(frm, textvariable=self.var_samplerate, width=10).grid(row=3, column=1, sticky='w', **pad)
+        ttk.Label(frm, text="Sample rate").grid(row=4, column=0, sticky='w', **pad)
+        ttk.Entry(frm, textvariable=self.var_samplerate, width=10).grid(row=4, column=1, sticky='w', **pad)
 
-        ttk.Label(frm, text="Bitrate (bps)").grid(row=3, column=2, sticky='e', **pad)
-        ttk.Entry(frm, textvariable=self.var_bitrate, width=10).grid(row=3, column=3, sticky='w', **pad)
+        ttk.Label(frm, text="Bitrate (bps)").grid(row=4, column=2, sticky='e', **pad)
+        ttk.Entry(frm, textvariable=self.var_bitrate, width=10).grid(row=4, column=3, sticky='w', **pad)
 
-        ttk.Label(frm, text="Frame size").grid(row=4, column=0, sticky='w', **pad)
-        ttk.Entry(frm, textvariable=self.var_framesize, width=10).grid(row=4, column=1, sticky='w', **pad)
+        ttk.Label(frm, text="Frame size").grid(row=5, column=0, sticky='w', **pad)
+        ttk.Entry(frm, textvariable=self.var_framesize, width=10).grid(row=5, column=1, sticky='w', **pad)
 
         self.btn_toggle = ttk.Button(frm, text="Старт", command=self.on_toggle)
-        self.btn_toggle.grid(row=5, column=0, columnspan=5, sticky='ew', **pad)
+        self.btn_toggle.grid(row=6, column=0, columnspan=5, sticky='ew', **pad)
 
-        ttk.Label(frm, textvariable=self.status_var, foreground='green').grid(row=6, column=0, columnspan=4, sticky='w', **pad)
+        ttk.Label(frm, textvariable=self.status_var, foreground='green').grid(row=7, column=0, columnspan=5, sticky='w', **pad)
 
     def _populate_devices(self):
         try:
@@ -255,6 +257,9 @@ class App(tk.Tk):
             self.cmb_device.set(self.var_device.get())
         elif items:
             self.cmb_device.current(0)
+
+        # toggle device controls depending on source
+        self._set_device_enabled(self.var_source.get() == "Микрофон")
 
     def _save_settings(self):
         data = {
@@ -300,7 +305,8 @@ class App(tk.Tk):
             self.sender.configure("0.0.0.0", 0, sr, fs, br, dev_id)
             self.sender.start()
             self.btn_toggle.configure(text='Стоп', state='normal')
-            self.status_var.set(f"Запущено → ожидание HELLO на порту {port} @ {sr}Hz, {br}bps, frame={fs}")
+            self.status_var.set(f"Запущено: порт {port} @ {sr}Hz, {br}bps, frame={fs}")
+            self.conn_status_var.set("Ждём HELLO")
             self._start_hello_listener(port)
             self._save_settings()
         except Exception as e:
@@ -313,6 +319,7 @@ class App(tk.Tk):
             self.btn_toggle.configure(text='Старт', state='normal')
             self.status_var.set("Остановлено")
             self._stop_hello_listener()
+            self.conn_status_var.set("Ждём HELLO")
 
     def on_toggle(self):
         self.btn_toggle.configure(state='disabled')
@@ -369,7 +376,7 @@ class App(tk.Tk):
                     if data and data.startswith(b"HELLO"):
                         # зафиксируем клиента
                         self.sender.target = (addr[0], addr[1])
-                        self.status_var.set(f"Клиент: {addr[0]}:{addr[1]}")
+                        self.conn_status_var.set("HELLO!")
                 except socket.timeout:
                     continue
                 except Exception:
@@ -390,6 +397,17 @@ class App(tk.Tk):
                 self._hello_thr.join(timeout=1)
         except Exception:
             pass
+
+    def _set_device_enabled(self, enabled: bool):
+        state = 'readonly' if enabled else 'disabled'
+        try:
+            self.cmb_device.configure(state=state)
+            self.btn_refresh.configure(state=('normal' if enabled else 'disabled'))
+        except Exception:
+            pass
+
+    def _on_source_change(self):
+        self._populate_devices()
 
 
 if __name__ == '__main__':
