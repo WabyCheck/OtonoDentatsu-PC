@@ -11,6 +11,7 @@ import tkinter.ttk as ttk
 from tkinter import messagebox
 
 import numpy as np
+from queue import Queue, Empty
 import sounddevice as sd
 import opuslib
 from PIL import Image, ImageDraw
@@ -31,6 +32,9 @@ class AudioSender:
         self.frame_size = 240
         self.bitrate = 128000
         self.device_id = None
+        self._q: Queue[np.ndarray] = Queue(maxsize=256)
+        self._tx_thread: threading.Thread | None = None
+        self._stop = threading.Event()
 
         # state protected by GIL; callback is same process/thread context from PortAudio
 
@@ -53,32 +57,48 @@ class AudioSender:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     def _callback(self, indata, frames, time, status):
-        if not self.running or self.encoder is None or self.sock is None:
+        # Keep callback ultra-light: convert to int16 stereo and enqueue; drop oldest on overflow
+        if not self.running:
             return
-        if status:
-            # PortAudio status warnings can be ignored or logged
-            pass
         try:
-            # Ensure stereo int16 PCM expected by opuslib
             if indata.dtype != np.int16:
                 audio_int16 = (indata * 32767.0).astype(np.int16, copy=False)
             else:
                 audio_int16 = indata
-
-            # stereo: channels 0/1
+            if audio_int16.ndim == 1:
+                audio_int16 = audio_int16.reshape(-1, 1)
             if audio_int16.shape[1] >= 2:
                 stereo = audio_int16[:, :2]
             else:
-                # duplicate mono to stereo
                 stereo = np.repeat(audio_int16, 2, axis=1)
-
-            # opus expects bytes for frame_size samples per channel
-            pcm_bytes = stereo.tobytes(order='C')
-            packet = self.encoder.encode(pcm_bytes, self.frame_size)
-            self.sock.sendto(packet, self.target)
+            try:
+                self._q.put_nowait(stereo.copy())
+            except Exception:
+                try:
+                    _ = self._q.get_nowait()  # drop oldest
+                except Exception:
+                    pass
+                try:
+                    self._q.put_nowait(stereo.copy())
+                except Exception:
+                    pass
         except Exception:
-            # swallow to keep callback realtime-safe
             pass
+
+    def _tx_loop(self):
+        while not self._stop.is_set():
+            try:
+                frame = self._q.get(timeout=0.05)
+            except Empty:
+                continue
+            try:
+                if not self.running or self.encoder is None or self.sock is None:
+                    continue
+                pcm_bytes = frame.tobytes(order='C')
+                packet = self.encoder.encode(pcm_bytes, self.frame_size)
+                self.sock.sendto(packet, self.target)
+            except Exception:
+                pass
 
     def start(self):
         if self.running:
@@ -96,7 +116,9 @@ class AudioSender:
             callback=self._callback,
         )
         self.stream.start()
-
+        self._stop.clear()
+        self._tx_thread = threading.Thread(target=self._tx_loop, daemon=True)
+        self._tx_thread.start()
         self.running = True
 
     def stop(self):
@@ -114,6 +136,14 @@ class AudioSender:
         finally:
             self.sock = None
         self.encoder = None
+        self._stop.set()
+        try:
+            if self._tx_thread and self._tx_thread.is_alive():
+                self._tx_thread.join(timeout=1)
+        except Exception:
+            pass
+        with self._q.mutex:
+            self._q.queue.clear()
         self.running = False
 
 
