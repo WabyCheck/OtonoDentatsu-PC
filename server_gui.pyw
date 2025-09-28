@@ -42,12 +42,8 @@ class AudioSender:
         self.device_id = device_id
 
     def _ensure_encoder(self):
-        # use restricted low-delay profile to reduce algorithmic latency
-        try:
-            application = opuslib.APPLICATION_RESTRICTED_LOWDELAY
-        except AttributeError:
-            application = opuslib.APPLICATION_AUDIO
-        enc = opuslib.Encoder(self.sample_rate, 2, application)
+        # Stable default profile
+        enc = opuslib.Encoder(self.sample_rate, 2, opuslib.APPLICATION_AUDIO)
         enc.bitrate = self.bitrate
         enc.complexity = 10
         enc.signal_type = opuslib.SIGNAL_MUSIC
@@ -90,55 +86,16 @@ class AudioSender:
         self._ensure_encoder()
         self._open_socket()
 
-        # Prepare low-latency WASAPI settings when available
-        extra = None
-        kwargs = dict(
+        # Open input stream with stable defaults
+        self.stream = sd.InputStream(
             device=self.device_id,
             samplerate=self.sample_rate,
             channels=2,
             blocksize=self.frame_size,
             dtype='int16',
             callback=self._callback,
-            latency='low',
         )
-        try:
-            dev = sd.query_devices(self.device_id)
-            host = sd.query_hostapis(dev.get('hostapi', 0)).get('name', '').lower()
-            name = str(dev.get('name', '')).lower()
-            if 'wasapi' in host:
-                if '(loopback)' in name:
-                    # Loopback works only in shared mode, but we still request low latency
-                    extra = sd.WasapiSettings(loopback=True, exclusive=False)
-                else:
-                    # Try exclusive mode for capture devices to cut system mixer latency
-                    extra = sd.WasapiSettings(exclusive=True)
-                kwargs['extra_settings'] = extra
-        except Exception:
-            pass
-
-        # Try to open stream; on failure with exclusive, fallback to shared
-        def _try_open(_kwargs):
-            s = sd.InputStream(**_kwargs)
-            s.start()
-            return s
-
-        try:
-            self.stream = _try_open(kwargs)
-        except Exception as e1:
-            # Fallback: if we tried WASAPI exclusive, drop to shared
-            try:
-                if 'extra_settings' in kwargs and isinstance(kwargs['extra_settings'], sd.WasapiSettings) and getattr(kwargs['extra_settings'], 'exclusive', False):
-                    ws = sd.WasapiSettings(exclusive=False)
-                    kwargs_fallback = dict(kwargs)
-                    kwargs_fallback['extra_settings'] = ws
-                    self.stream = _try_open(kwargs_fallback)
-                else:
-                    raise e1
-            except Exception as e2:
-                # Final fallback: remove extra_settings entirely
-                kwargs_final = dict(kwargs)
-                kwargs_final.pop('extra_settings', None)
-                self.stream = _try_open(kwargs_final)
+        self.stream.start()
 
         self.running = True
 
@@ -182,7 +139,7 @@ class App(tk.Tk):
         self.var_port = tk.StringVar(value="5000")
         self.var_samplerate = tk.StringVar(value="48000")
         self.var_bitrate = tk.StringVar(value="128000")
-        self.var_framesize = tk.StringVar(value="120")
+        self.var_framesize = tk.StringVar(value="240")
         self.status_var = tk.StringVar(value="Остановлено")
         self.local_ip_var = tk.StringVar(value=self._detect_local_ip())
 
