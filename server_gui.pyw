@@ -127,6 +127,7 @@ class App(tk.Tk):
         self.var_bitrate = tk.StringVar(value="128000")
         self.var_framesize = tk.StringVar(value="240")
         self.status_var = tk.StringVar(value="Остановлено")
+        self.local_ip_var = tk.StringVar(value=self._detect_local_ip())
 
         self.devices = []  # list[(id, name)]
 
@@ -147,27 +148,28 @@ class App(tk.Tk):
         self.cmb_device.grid(row=0, column=1, columnspan=2, sticky='ew', **pad)
         ttk.Button(frm, text="Обновить", command=self._populate_devices).grid(row=0, column=3, **pad)
 
-        ttk.Label(frm, text="Целевой IP").grid(row=1, column=0, sticky='w', **pad)
-        ttk.Entry(frm, textvariable=self.var_ip, width=18).grid(row=1, column=1, sticky='w', **pad)
+        ttk.Label(frm, text="IP ПК").grid(row=1, column=0, sticky='w', **pad)
+        ttk.Label(frm, textvariable=self.local_ip_var).grid(row=1, column=1, sticky='w', **pad)
 
-        ttk.Label(frm, text="Порт").grid(row=1, column=2, sticky='e', **pad)
-        ttk.Entry(frm, textvariable=self.var_port, width=10).grid(row=1, column=3, sticky='w', **pad)
+        ttk.Label(frm, text="Целевой IP").grid(row=2, column=0, sticky='w', **pad)
+        ttk.Entry(frm, textvariable=self.var_ip, width=18).grid(row=2, column=1, sticky='w', **pad)
 
-        ttk.Label(frm, text="Sample rate").grid(row=2, column=0, sticky='w', **pad)
-        ttk.Entry(frm, textvariable=self.var_samplerate, width=10).grid(row=2, column=1, sticky='w', **pad)
+        ttk.Label(frm, text="Порт").grid(row=2, column=2, sticky='e', **pad)
+        ttk.Entry(frm, textvariable=self.var_port, width=10).grid(row=2, column=3, sticky='w', **pad)
 
-        ttk.Label(frm, text="Bitrate (bps)").grid(row=2, column=2, sticky='e', **pad)
-        ttk.Entry(frm, textvariable=self.var_bitrate, width=10).grid(row=2, column=3, sticky='w', **pad)
+        ttk.Label(frm, text="Sample rate").grid(row=3, column=0, sticky='w', **pad)
+        ttk.Entry(frm, textvariable=self.var_samplerate, width=10).grid(row=3, column=1, sticky='w', **pad)
 
-        ttk.Label(frm, text="Frame size").grid(row=3, column=0, sticky='w', **pad)
-        ttk.Entry(frm, textvariable=self.var_framesize, width=10).grid(row=3, column=1, sticky='w', **pad)
+        ttk.Label(frm, text="Bitrate (bps)").grid(row=3, column=2, sticky='e', **pad)
+        ttk.Entry(frm, textvariable=self.var_bitrate, width=10).grid(row=3, column=3, sticky='w', **pad)
 
-        self.btn_start = ttk.Button(frm, text="Старт", command=self.on_start)
-        self.btn_start.grid(row=4, column=0, columnspan=2, sticky='ew', **pad)
-        self.btn_stop = ttk.Button(frm, text="Стоп", command=self.on_stop, state='disabled')
-        self.btn_stop.grid(row=4, column=2, columnspan=2, sticky='ew', **pad)
+        ttk.Label(frm, text="Frame size").grid(row=4, column=0, sticky='w', **pad)
+        ttk.Entry(frm, textvariable=self.var_framesize, width=10).grid(row=4, column=1, sticky='w', **pad)
 
-        ttk.Label(frm, textvariable=self.status_var, foreground='green').grid(row=5, column=0, columnspan=4, sticky='w', **pad)
+        self.btn_toggle = ttk.Button(frm, text="Старт", command=self.on_toggle)
+        self.btn_toggle.grid(row=5, column=0, columnspan=4, sticky='ew', **pad)
+
+        ttk.Label(frm, textvariable=self.status_var, foreground='green').grid(row=6, column=0, columnspan=4, sticky='w', **pad)
 
     def _populate_devices(self):
         try:
@@ -234,8 +236,7 @@ class App(tk.Tk):
 
             self.sender.configure(ip, port, sr, fs, br, dev_id)
             self.sender.start()
-            self.btn_start.configure(state='disabled')
-            self.btn_stop.configure(state='normal')
+            self.btn_toggle.configure(text='Стоп', state='normal')
             self.status_var.set(f"Запущено → {ip}:{port} @ {sr}Hz, {br}bps, frame={fs}")
             self._save_settings()
         except Exception as e:
@@ -245,15 +246,43 @@ class App(tk.Tk):
         try:
             self.sender.stop()
         finally:
-            self.btn_start.configure(state='normal')
-            self.btn_stop.configure(state='disabled')
+            self.btn_toggle.configure(text='Старт', state='normal')
             self.status_var.set("Остановлено")
+
+    def on_toggle(self):
+        self.btn_toggle.configure(state='disabled')
+        if self.sender.running:
+            self.on_stop()
+        else:
+            self.on_start()
+        # state updated by on_start/on_stop
 
     def on_close(self):
         try:
             self.sender.stop()
         finally:
             self.destroy()
+
+    def _detect_local_ip(self) -> str:
+        # Try default route IP
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            pass
+        # Fallback to hostname method
+        try:
+            hostname = socket.gethostname()
+            for info in socket.getaddrinfo(hostname, None, socket.AF_INET):
+                ip = info[4][0]
+                if not ip.startswith("127."):
+                    return ip
+        except Exception:
+            pass
+        return "0.0.0.0"
 
 
 if __name__ == '__main__':
