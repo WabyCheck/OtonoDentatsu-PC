@@ -362,9 +362,13 @@ def _load_tray_image():
             d.rectangle([62, 52, 86, 60], fill=(255, 255, 255, 255))
             d.rectangle([62, 68, 86, 76], fill=(255, 255, 255, 255))
             d.rectangle([90, 52, 112, 76], fill=(255, 255, 255, 255))
-    # Resize to typical tray size
+    # Ensure RGBA and sane size for Windows tray (32x32 works well on HiDPI)
     try:
-        return img.resize((16, 16), Image.LANCZOS)
+        img = img.convert('RGBA')
+    except Exception:
+        pass
+    try:
+        return img.resize((32, 32), Image.LANCZOS)
     except Exception:
         return img
 
@@ -381,12 +385,16 @@ def _init_tray_for(app: 'App'):
     image = _load_tray_image()
     icon = pystray.Icon('OND Client', image, 'OND Client', _tray_menu(app))
     app._tray = icon
-    def run():
-        try:
-            icon.run()
-        except Exception:
-            pass
-    threading.Thread(target=run, daemon=True).start()
+    try:
+        icon.run_detached()
+    except Exception:
+        # fallback to background thread
+        def run():
+            try:
+                icon.run()
+            except Exception:
+                pass
+        threading.Thread(target=run, daemon=True).start()
 
 
 # attach method to App dynamically to avoid refactor large class
