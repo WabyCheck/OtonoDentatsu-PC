@@ -11,6 +11,8 @@ from tkinter import messagebox
 import numpy as np
 import sounddevice as sd
 import opuslib
+from PIL import Image, ImageDraw
+import pystray
 
 
 SETTINGS_FILE = 'settings.json'
@@ -114,7 +116,7 @@ class AudioSender:
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Opus UDP Server")
+        self.title("OND Client")
         self.resizable(False, False)
 
         self.sender = AudioSender()
@@ -135,6 +137,11 @@ class App(tk.Tk):
         self._populate_devices()
 
         self.protocol("WM_DELETE_WINDOW", self.on_close)
+        # tray icon
+        try:
+            self._init_tray()
+        except Exception:
+            pass
 
     def _build_ui(self):
         pad = {'padx': 8, 'pady': 4}
@@ -260,6 +267,11 @@ class App(tk.Tk):
         finally:
             self.destroy()
             self._stop_hello_listener()
+            try:
+                if hasattr(self, '_tray') and self._tray:
+                    self._tray.stop()
+            except Exception:
+                pass
 
     def _detect_local_ip(self) -> str:
         # Try default route IP
@@ -321,3 +333,43 @@ class App(tk.Tk):
 
 if __name__ == '__main__':
     App().mainloop()
+
+    
+    
+def _make_icon_image():
+    img = Image.new('RGBA', (128, 128), (32, 96, 224, 255))
+    d = ImageDraw.Draw(img)
+    # simple white rectangle letters "OND"
+    d.rectangle([16, 52, 48, 76], fill=(255, 255, 255, 255))
+    d.rectangle([54, 52, 62, 76], fill=(255, 255, 255, 255))
+    d.rectangle([62, 52, 86, 60], fill=(255, 255, 255, 255))
+    d.rectangle([62, 68, 86, 76], fill=(255, 255, 255, 255))
+    d.rectangle([90, 52, 112, 76], fill=(255, 255, 255, 255))
+    return img
+
+
+def _tray_menu(app: 'App'):
+    return pystray.Menu(
+        pystray.MenuItem('Открыть', lambda: app.deiconify()),
+        pystray.MenuItem('Старт' if not app.sender.running else 'Стоп', lambda: app.on_toggle()),
+        pystray.MenuItem('Выход', lambda: app.on_close())
+    )
+
+
+def _init_tray_for(app: 'App'):
+    image = _make_icon_image()
+    icon = pystray.Icon('OND Client', image, 'OND Client', _tray_menu(app))
+    app._tray = icon
+    def run():
+        try:
+            icon.run()
+        except Exception:
+            pass
+    threading.Thread(target=run, daemon=True).start()
+
+
+# attach method to App dynamically to avoid refactor large class
+def _init_tray(self: 'App'):
+    _init_tray_for(self)
+
+App._init_tray = _init_tray
