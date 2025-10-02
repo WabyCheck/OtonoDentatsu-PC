@@ -18,4 +18,4 @@ Run:
 - Launch OND Client.exe (or `python server_gui.pyw` in dev)
 - Set port and parameters, click Start
 
-License: MIT (add your choice)
+License: MIT
